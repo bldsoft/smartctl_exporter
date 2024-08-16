@@ -38,6 +38,7 @@ type Device struct {
 	Name      string `json:"name"`
 	Info_Name string `json:"info_name"`
 	Type      string `json:"type"`
+	Id        int    `json:"id,omitempty"`
 }
 
 // SMARTctlManagerCollector implements the Collector interface.
@@ -49,6 +50,8 @@ type SMARTctlManagerCollector struct {
 	logger log.Logger
 	mutex  sync.Mutex
 }
+
+const CcissType = "cciss"
 
 // Describe sends the super-set of all possible descriptors of metrics
 func (i *SMARTctlManagerCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -111,27 +114,55 @@ var (
 	smartctlFakeData = kingpin.Flag("smartctl.fake-data",
 		"The device to monitor (repeatable)",
 	).Default("false").Hidden().Bool()
+	ccissVolStatusPath = kingpin.Flag("ccissvolstatus.path",
+		"The path to the cciss_vol_status binary",
+	).Default("/usr/bin/cciss_vol_status").String()
 )
 
 // scanDevices uses smartctl to gather the list of available devices.
 func scanDevices(logger log.Logger) []Device {
 	filter := newDeviceFilter(*smartctlDeviceExclude, *smartctlDeviceInclude)
 
-	json := readSMARTctlDevices(logger)
-	scanDevices := json.Get("devices").Array()
-	var scanDeviceResult []Device
+	baseDevices := readSMARTctlDevices(logger)
+	raidDevices := readSMARTctlDevices(logger, "-d", "sat")
+
+	scanDevices := []Device{}
+
+	isExists := map[string]bool{}
+	for _, d := range baseDevices.Get("devices").Array() {
+		level.Debug(logger).Log("base_device: ", d)
+		isExists[strings.TrimSpace(d.Get("info_name").String())] = true
+
+		deviceName := getDiskName(
+			strings.TrimSpace(d.Get("name").String()),
+			strings.TrimSpace(d.Get("info_name").String()),
+		)
+
+		device := Device{
+			Name:      d.Get("name").String(),
+			Info_Name: deviceName,
+			Type:      d.Get("type").String(),
+		}
+		scanDevices = append(scanDevices, device)
+	}
+
+	for _, d := range raidDevices.Get("devices").Array() {
+		if isExists[strings.TrimSpace(d.Get("info_name").String())] {
+			continue
+		}
+		level.Debug(logger).Log("raid_device: ", d)
+
+		devices := formatDevices(logger, d)
+		scanDevices = append(scanDevices, devices...)
+	}
+
+	scanDeviceResult := []Device{}
 	for _, d := range scanDevices {
-		deviceName := extractDiskName(strings.TrimSpace(d.Get("info_name").String()))
-		if filter.ignored(deviceName) {
-			level.Info(logger).Log("msg", "Ignoring device", "name", deviceName)
+		if filter.ignored(d.Info_Name) {
+			level.Info(logger).Log("msg", "Ignoring device", "name", d.Info_Name)
 		} else {
-			level.Info(logger).Log("msg", "Found device", "name", deviceName)
-			device := Device{
-				Name:      d.Get("name").String(),
-				Info_Name: deviceName,
-				Type:      d.Get("type").String(),
-			}
-			scanDeviceResult = append(scanDeviceResult, device)
+			level.Info(logger).Log("msg", "Found device", "name", d.Info_Name)
+			scanDeviceResult = append(scanDeviceResult, d)
 		}
 	}
 	return scanDeviceResult

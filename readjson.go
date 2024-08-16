@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +66,13 @@ func readFakeSMARTctl(logger log.Logger, device Device) gjson.Result {
 // Get json from smartctl and parse it
 func readSMARTctl(logger log.Logger, device Device) (gjson.Result, bool) {
 	start := time.Now()
-	out, err := exec.Command(*smartctlPath, "--json", "--info", "--health", "--attributes", "--tolerance=verypermissive", "--nocheck=standby", "--format=brief", "--log=error", "--device="+device.Type, device.Name).Output()
+
+	args := []string{"--json", "--info", "--health", "--attributes", "--tolerance=verypermissive", "--nocheck=standby", "--format=brief", "--log=error", device.Name}
+	if device.Type == CcissType {
+		args = append(args, "-d", strings.Join([]string{device.Type, strconv.Itoa(device.Id)}, ","))
+	}
+
+	out, err := exec.Command(*smartctlPath, args...).Output()
 	if err != nil {
 		level.Warn(logger).Log("msg", "S.M.A.R.T. output reading", "err", err, "device", device.Info_Name)
 	}
@@ -75,9 +83,10 @@ func readSMARTctl(logger log.Logger, device Device) (gjson.Result, bool) {
 	return json, rcOk && jsonOk
 }
 
-func readSMARTctlDevices(logger log.Logger) gjson.Result {
+func readSMARTctlDevices(logger log.Logger, args ...string) gjson.Result {
 	level.Debug(logger).Log("msg", "Scanning for devices")
-	out, err := exec.Command(*smartctlPath, "--json", "--scan").Output()
+	args = append([]string{"--json", "--scan"}, args...)
+	out, err := exec.Command(*smartctlPath, args...).Output()
 	if exiterr, ok := err.(*exec.ExitError); ok {
 		level.Debug(logger).Log("msg", "Exit Status", "exit_code", exiterr.ExitCode())
 		// The smartctl command returns 2 if devices are sleeping, ignore this error.
@@ -87,6 +96,41 @@ func readSMARTctlDevices(logger log.Logger) gjson.Result {
 		}
 	}
 	return parseJSON(string(out))
+}
+
+func formatDevices(logger log.Logger, raid gjson.Result) []Device {
+	devices := []Device{}
+
+	device := Device{
+		Name:      raid.Get("name").String(),
+		Info_Name: extractDiskName(strings.TrimSpace(raid.Get("name").String())),
+		Type:      CcissType,
+	}
+
+	level.Debug(logger).Log("raid_device: ", device.Info_Name)
+	out, err := exec.Command(*ccissVolStatusPath, device.Name, "-V").Output()
+	if exiterr, ok := err.(*exec.ExitError); ok {
+		level.Debug(logger).Log("msg", "Exit Status", "exit_code", exiterr.ExitCode())
+		// 0 - All configured logical drives queried have status of "OK."
+		// 1 - One or more configured logical drives queried have status other than "OK."
+		if exiterr.ExitCode() > 1 {
+			level.Warn(logger).Log("msg", "cciss_vol_status output reading", "err", err, "device", device.Info_Name)
+			return devices
+		}
+	}
+
+	re := regexp.MustCompile(`.*Physical drives: (?P<num_drivers>[0-9]+)`)
+	match := re.FindStringSubmatch(string(out))
+
+	idx := re.SubexpIndex("num_drivers")
+	numDrivers, _ := strconv.Atoi(match[idx])
+	for i := 0; i < numDrivers; i++ {
+		d := device
+		d.Id = i
+		devices = append(devices, d)
+	}
+
+	return devices
 }
 
 // Select json source and parse

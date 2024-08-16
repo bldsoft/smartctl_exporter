@@ -67,6 +67,30 @@ func extractDiskName(input string) string {
 	return ""
 }
 
+func extractDiskExtName(input string) string {
+	re := regexp.MustCompile(`(?P<disk>cciss[a-zA-Z0-9_]+)`)
+	match := re.FindStringSubmatch(input)
+
+	name := ""
+
+	if len(match) > 0 {
+		diskIndex := re.SubexpIndex("disk")
+		if diskIndex != -1 && match[diskIndex] != "" {
+			name = match[diskIndex]
+		}
+	}
+	return name
+}
+
+func getDiskName(input, extInput string) string {
+	name := extractDiskName(input)
+	extName := extractDiskExtName(extInput)
+	if extName != "" {
+		name = fmt.Sprintf("%s_%s", name, extName)
+	}
+	return name
+}
+
 // NewSMARTctl is smartctl constructor
 func NewSMARTctl(logger log.Logger, json gjson.Result, ch chan<- prometheus.Metric) SMARTctl {
 	var model_name string
@@ -80,12 +104,17 @@ func NewSMARTctl(logger log.Logger, json gjson.Result, ch chan<- prometheus.Metr
 		model_name = "unknown"
 	}
 
+	deviceName := getDiskName(
+		strings.TrimSpace(json.Get("device.name").String()),
+		strings.TrimSpace(json.Get("device.info_name").String()),
+	)
+
 	return SMARTctl{
 		ch:     ch,
 		json:   json,
 		logger: logger,
 		device: SMARTDevice{
-			device:     extractDiskName(strings.TrimSpace(json.Get("device.info_name").String())),
+			device:     deviceName,
 			serial:     strings.TrimSpace(json.Get("serial_number").String()),
 			family:     strings.TrimSpace(GetStringIfExists(json, "model_family", "unknown")),
 			model:      strings.TrimSpace(model_name),
