@@ -13,10 +13,10 @@
 
 # Needs to be defined before including Makefile.common to auto-generate targets
 DOCKER_ARCHS ?= amd64
-DOCKER_REPO  ?= prometheuscommunity
+DOCKER_REPO  ?= setplexapps
 
 include Makefile.common
 
 STATICCHECK_IGNORE =
 
-DOCKER_IMAGE_NAME ?= smartctl-exporter
+DOCKER_IMAGE_NAME ?= tools
