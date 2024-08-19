@@ -118,9 +118,14 @@ func formatDevices(logger log.Logger, raid gjson.Result) []Device {
 			return devices
 		}
 	}
+	level.Debug(logger).Log("cciss_vol_status: ", string(out))
 
 	re := regexp.MustCompile(`.*Physical drives: (?P<num_drivers>[0-9]+)`)
 	match := re.FindStringSubmatch(string(out))
+
+	if len(match) == 0 {
+		return devices
+	}
 
 	idx := re.SubexpIndex("num_drivers")
 	numDrivers, _ := strconv.Atoi(match[idx])
