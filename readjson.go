@@ -68,8 +68,8 @@ func readSMARTctl(logger log.Logger, device Device) (gjson.Result, bool) {
 	start := time.Now()
 
 	args := []string{"--json", "--info", "--health", "--attributes", "--tolerance=verypermissive", "--nocheck=standby", "--format=brief", "--log=error", device.Name}
-	if device.Type == CcissType {
-		args = append(args, "-d", strings.Join([]string{device.Type, strconv.Itoa(device.Id)}, ","))
+	if strings.Contains(device.Type, CcissType) || strings.Contains(device.Type, MegaraidType) {
+		args = append(args, "-d", device.Type)
 	}
 
 	out, err := exec.Command(*smartctlPath, args...).Output()
@@ -131,7 +131,7 @@ func formatDevices(logger log.Logger, raid gjson.Result) []Device {
 	numDrivers, _ := strconv.Atoi(match[idx])
 	for i := 0; i < numDrivers; i++ {
 		d := device
-		d.Id = i
+		d.Type = fmt.Sprintf("%s,%d", d.Type, i)
 		devices = append(devices, d)
 	}
 

@@ -44,7 +44,7 @@ type SMARTctl struct {
 }
 
 func extractDiskName(input string) string {
-	re := regexp.MustCompile(`^(?:/dev/(?P<bus_name>\S+)/(?P<bus_num>\S+)\s\[|/dev/|\[)(?:\s\[|)(?P<disk>[a-z0-9_]+)(?:\].*|)$`)
+	re := regexp.MustCompile(`^(?:/dev/(?P<bus_name>\S+)/(?P<bus_num>\S+))|(?:/dev/(?P<bus_name>\S+)/(?P<bus_num>\S+)\s\[|/dev/|\[)(?:\s\[|)(?P<disk>[a-z0-9_]+)(?:\].*|)$`)
 	match := re.FindStringSubmatch(input)
 
 	if len(match) > 0 {
@@ -68,7 +68,8 @@ func extractDiskName(input string) string {
 }
 
 func extractDiskExtName(input string) string {
-	re := regexp.MustCompile(`(?P<disk>cciss[a-zA-Z0-9_]+)`)
+	pattern := fmt.Sprintf("(?P<disk>(%s|%s)[a-zA-Z0-9_]+)", CcissType, MegaraidType)
+	re := regexp.MustCompile(pattern)
 	match := re.FindStringSubmatch(input)
 
 	name := ""

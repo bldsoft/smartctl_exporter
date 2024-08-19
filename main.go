@@ -38,7 +38,6 @@ type Device struct {
 	Name      string `json:"name"`
 	Info_Name string `json:"info_name"`
 	Type      string `json:"type"`
-	Id        int    `json:"id,omitempty"`
 }
 
 // SMARTctlManagerCollector implements the Collector interface.
@@ -52,6 +51,7 @@ type SMARTctlManagerCollector struct {
 }
 
 const CcissType = "cciss"
+const MegaraidType = "megaraid"
 
 // Describe sends the super-set of all possible descriptors of metrics
 func (i *SMARTctlManagerCollector) Describe(ch chan<- *prometheus.Desc) {
