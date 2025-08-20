@@ -274,6 +274,7 @@ func main() {
 	prometheus.WrapRegistererWithPrefix("", reg).MustRegister(&collector)
 
 	http.Handle(*metricsPath, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	http.Handle("/devices", devicesHandler(&collector))
 
 	if *metricsPath != "/" && *metricsPath != "" {
 		landingConfig := web.LandingConfig{

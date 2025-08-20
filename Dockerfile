@@ -5,14 +5,11 @@ FROM golang:1.22-alpine AS build
 
 WORKDIR /app
 
-ENV VERSION $VERSION
-ENV BUILD_DATE $BUILD_DATE
+COPY . .
+RUN go mod download && \
+    go mod verify
 
-COPY . ./
-RUN go mod download
-RUN go mod verify
-
-RUN apk add --no-cache make curl
+RUN apk add --no-cache make curl git
 
 RUN make common-build
 
