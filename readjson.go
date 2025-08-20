@@ -18,6 +18,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,9 +84,9 @@ func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
 	}
 }
 
-func readSMARTctlDevices(logger *slog.Logger) gjson.Result {
+func readSMARTctlDevices(logger *slog.Logger, scanArgs ...string) gjson.Result {
 	logger.Debug("Scanning for devices")
-	var scanArgs []string = []string{"--json", "--scan"}
+	scanArgs = append([]string{"--json", "--scan"}, scanArgs...)
 	for _, d := range *smartctlScanDeviceTypes {
 		scanArgs = append(scanArgs, "--device", d)
 	}
@@ -118,6 +120,51 @@ func refreshAllDevices(logger *slog.Logger, devices []Device) {
 		}
 	}
 	wg.Wait()
+}
+
+func parseCcissDevices(logger *slog.Logger, cciss gjson.Result) []Device {
+	devices := []Device{}
+
+	deviceName := cciss.Get("name").String()
+	deviceLabel := buildDeviceLabel(
+		strings.TrimSpace(cciss.Get("name").String()),
+		strings.TrimSpace(cciss.Get("info_name").String()),
+	)
+	device := Device{
+		Name:  deviceName,
+		Label: deviceLabel,
+		Type:  CcissType,
+	}
+
+	logger.Debug("cciss_device", device.Label)
+	out, err := exec.Command(*ccissVolStatusPath, device.Name, "-V").Output()
+	if exiterr, ok := err.(*exec.ExitError); ok {
+		logger.Debug("Exit Status", "exit_code", exiterr.ExitCode())
+		// 0 - All configured logical drives queried have status of "OK."
+		// 1 - One or more configured logical drives queried have status other than "OK."
+		if exiterr.ExitCode() > 1 {
+			logger.Warn("cciss_vol_status output reading", "err", err, "device", device.Label)
+			return devices
+		}
+	}
+	logger.Debug("cciss_vol_status: ", string(out))
+
+	re := regexp.MustCompile(`.*Physical drives: (?P<num_drivers>[0-9]+)`)
+	match := re.FindStringSubmatch(string(out))
+
+	if len(match) == 0 {
+		return devices
+	}
+
+	idx := re.SubexpIndex("num_drivers")
+	numDrivers, _ := strconv.Atoi(match[idx])
+	for i := 0; i < numDrivers; i++ {
+		d := device
+		d.Type = fmt.Sprintf("%s,%d", d.Type, i)
+		devices = append(devices, d)
+	}
+
+	return devices
 }
 
 func readData(logger *slog.Logger, device Device) gjson.Result {

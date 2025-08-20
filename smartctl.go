@@ -42,15 +42,57 @@ type SMARTctl struct {
 	device SMARTDevice
 }
 
-func buildDeviceLabel(inputName string, inputType string) string {
-	// Strip /dev prefix and replace / with _ (/dev/bus/0 becomes bus_0, /dev/disk/by-id/abcd becomes abcd)
-	devReg := regexp.MustCompile(`^/dev/(?:disk/by-id/|disk/by-path/|)`)
-	deviceName := strings.ReplaceAll(devReg.ReplaceAllString(inputName, ""), "/", "_")
+func extractBaseDiskName(info string) string {
+	re := regexp.MustCompile(`^(?:/dev/(?P<bus_name>\S+)/(?P<bus_num>\S+))|(?:/dev/(?P<bus_name>\S+)/(?P<bus_num>\S+)\s\[|/dev/|\[)(?:\s\[|)(?P<disk>[a-z0-9_]+)(?:\].*|)$`)
+	match := re.FindStringSubmatch(info)
 
-	if strings.Contains(inputType, ",") {
-		return deviceName + "_" + strings.ReplaceAll(inputType, ",", "_")
+	if len(match) > 0 {
+		busNameIndex := re.SubexpIndex("bus_name")
+		busNumIndex := re.SubexpIndex("bus_num")
+		diskIndex := re.SubexpIndex("disk")
+		var name []string
+		if busNameIndex != -1 && match[busNameIndex] != "" {
+			name = append(name, match[busNameIndex])
+		}
+		if busNumIndex != -1 && match[busNumIndex] != "" {
+			name = append(name, match[busNumIndex])
+		}
+		if diskIndex != -1 && match[diskIndex] != "" {
+			name = append(name, match[diskIndex])
+		}
+
+		return strings.Join(name, "_")
 	}
+	return ""
+}
 
+func extractExtendedDiskName(fullInfo string) string {
+	pattern := fmt.Sprintf("(?P<disk>(%s|%s)[a-zA-Z0-9_]+)", CcissType, MegaraidType)
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(fullInfo)
+
+	name := ""
+
+	if len(match) > 0 {
+		diskIndex := re.SubexpIndex("disk")
+		if diskIndex != -1 && match[diskIndex] != "" {
+			name = match[diskIndex]
+		}
+	}
+	return name
+}
+
+func buildDeviceLabel(nameRaw, extNameRaw string) string {
+	// The type field is not used because it does not contain complete information everywhere
+	// Example:
+	// type - "scsi"; name(nameRaw) - "/dev/sda"; info_name(extNameRaw) - "/dev/sda"
+	// type - "cciss"; name(nameRaw) - "/dev/sda"; info_name(extNameRaw) - "/dev/sda [cciss_disk_01] [SCSI]"
+	// type - "sat+megaraid,1"; name(nameRaw) - "/dev/sda"; info_name(extNameRaw) - "/dev/sda [megaraid_disk_01] [SAT]"
+	deviceName := extractBaseDiskName(nameRaw)
+	extDeviceName := extractExtendedDiskName(extNameRaw)
+	if extDeviceName != "" {
+		deviceName = fmt.Sprintf("%s_%s", deviceName, extDeviceName)
+	}
 	return deviceName
 }
 
@@ -67,12 +109,17 @@ func NewSMARTctl(logger *slog.Logger, json gjson.Result, ch chan<- prometheus.Me
 		model_name = "unknown"
 	}
 
+	deviceName := buildDeviceLabel(
+		strings.TrimSpace(json.Get("device.name").String()),
+		strings.TrimSpace(json.Get("device.info_name").String()),
+	)
+
 	return SMARTctl{
 		ch:     ch,
 		json:   json,
 		logger: logger,
 		device: SMARTDevice{
-			device:     buildDeviceLabel(json.Get("device.name").String(), json.Get("device.type").String()),
+			device:     deviceName,
 			serial:     strings.TrimSpace(json.Get("serial_number").String()),
 			family:     strings.TrimSpace(GetStringIfExists(json, "model_family", "unknown")),
 			model:      strings.TrimSpace(model_name),

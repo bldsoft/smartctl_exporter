@@ -64,16 +64,23 @@ using the `--web.config.file` parameter. The format of the file is described
 ## Example of running in Docker
 
 Minimal functional `docker-compose.yml`:
+
 ```yaml
 version: "3"
 
 services:
   smartctl-exporter:
-    image: prometheuscommunity/smartctl-exporter
+    image: setplexapps/tools:smartctl_exporter-<version>
     privileged: true
     user: root
     ports:
       - "9633:9633"
+```
+
+or
+
+```bash
+docker run --rm -p 9633:9633 --privileged --user root setplexapps/tools:smartctl_exporter-<version>
 ```
 
 # Troubleshooting
@@ -171,6 +178,21 @@ sudo ./smartctl_exporter --web.listen-address=127.0.0.1:19633 --log.level=debug 
 curl --silent 127.0.0.1:19633/metrics | grep -i nvme
 # Or xh with ripgrep
 xh --body :19633/metrics | rg nvme
+```
+
+## How build docker image?
+
+build
+
+```bash
+make common-docker
+make common-docker-tag-latest
+```
+
+push
+
+```bash
+make common-docker-publish
 ```
 
 ## Why is root required? Can't I add a user to the "disk" group?

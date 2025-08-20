@@ -55,6 +55,9 @@ type SMARTctlManagerCollector struct {
 	mutex  sync.Mutex
 }
 
+const CcissType = "cciss"
+const MegaraidType = "megaraid"
+
 // Describe sends the super-set of all possible descriptors of metrics
 func (i *SMARTctlManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	prometheus.DescribeByCollect(i, ch)
@@ -123,6 +126,9 @@ var (
 	smartctlFakeData = kingpin.Flag("smartctl.fake-data",
 		"The device to monitor (repeatable)",
 	).Default("false").Hidden().Bool()
+	ccissVolStatusPath = kingpin.Flag("ccissvolstatus.path",
+		"The path to the cciss_vol_status binary",
+	).Default("/usr/bin/cciss_vol_status").String()
 	smartctlPowerModeCheck = kingpin.Flag("smartctl.powermode-check",
 		"Whether or not to check powermode before fetching data",
 	).Default("standby").String()
@@ -132,10 +138,16 @@ var (
 func scanDevices(logger *slog.Logger) []Device {
 	filter := newDeviceFilter(*smartctlDeviceExclude, *smartctlDeviceInclude)
 
-	json := readSMARTctlDevices(logger)
-	scanDevices := json.Get("devices").Array()
-	var scanDeviceResult []Device
-	for _, d := range scanDevices {
+	baseDevices := readSMARTctlDevices(logger)
+	ccissDevices := readSMARTctlDevices(logger, "--device", "sat")
+
+	scanDevices := []Device{}
+
+	isExists := map[string]bool{}
+	for _, d := range baseDevices.Get("devices").Array() {
+		logger.Debug("Base device", "name", d)
+		isExists[strings.TrimSpace(d.Get("info_name").String())] = true
+
 		deviceName := d.Get("name").String()
 		deviceType := d.Get("type").String()
 
@@ -144,17 +156,36 @@ func scanDevices(logger *slog.Logger) []Device {
 			deviceType = "auto"
 		}
 
-		deviceLabel := buildDeviceLabel(deviceName, deviceType)
-		if filter.ignored(deviceLabel) {
-			logger.Info("Ignoring device", "name", deviceLabel)
+		deviceLabel := buildDeviceLabel(
+			strings.TrimSpace(d.Get("name").String()),
+			strings.TrimSpace(d.Get("info_name").String()),
+		)
+
+		device := Device{
+			Name:  deviceName,
+			Type:  deviceType,
+			Label: deviceLabel,
+		}
+		scanDevices = append(scanDevices, device)
+	}
+
+	for _, d := range ccissDevices.Get("devices").Array() {
+		if isExists[strings.TrimSpace(d.Get("info_name").String())] {
+			continue
+		}
+		logger.Debug("Raid device", "name", d)
+
+		devices := parseCcissDevices(logger, d)
+		scanDevices = append(scanDevices, devices...)
+	}
+
+	scanDeviceResult := []Device{}
+	for _, d := range scanDevices {
+		if filter.ignored(d.Label) {
+			logger.Info("Ignoring device", "name", d.Label)
 		} else {
-			logger.Info("Found device", "name", deviceLabel)
-			device := Device{
-				Name:  deviceName,
-				Type:  deviceType,
-				Label: deviceLabel,
-			}
-			scanDeviceResult = append(scanDeviceResult, device)
+			logger.Info("Found device", "name", d.Label)
+			scanDeviceResult = append(scanDeviceResult, d)
 		}
 	}
 	return scanDeviceResult
