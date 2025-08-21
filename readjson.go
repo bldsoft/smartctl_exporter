@@ -84,9 +84,9 @@ func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
 	}
 }
 
-func readSMARTctlDevices(logger *slog.Logger, scanArgs ...string) gjson.Result {
+func readSMARTctlDevices(logger *slog.Logger) gjson.Result {
 	logger.Debug("Scanning for devices")
-	scanArgs = append([]string{"--json", "--scan"}, scanArgs...)
+	scanArgs := []string{"--json", "--scan"}
 	for _, d := range *smartctlScanDeviceTypes {
 		scanArgs = append(scanArgs, "--device", d)
 	}
@@ -122,21 +122,10 @@ func refreshAllDevices(logger *slog.Logger, devices []Device) {
 	wg.Wait()
 }
 
-func parseCcissDevices(logger *slog.Logger, cciss gjson.Result) []Device {
+func parseIfItIsCcissDevices(logger *slog.Logger, device Device) []Device {
 	devices := []Device{}
 
-	deviceName := cciss.Get("name").String()
-	deviceLabel := buildDeviceLabel(
-		strings.TrimSpace(cciss.Get("name").String()),
-		strings.TrimSpace(cciss.Get("info_name").String()),
-	)
-	device := Device{
-		Name:  deviceName,
-		Label: deviceLabel,
-		Type:  CcissType,
-	}
-
-	logger.Debug("cciss_device", device.Label)
+	logger.Debug("try get cciss device status", "label", device.Label, "name", device.Name)
 	out, err := exec.Command(*ccissVolStatusPath, device.Name, "-V").Output()
 	if exiterr, ok := err.(*exec.ExitError); ok {
 		logger.Debug("Exit Status", "exit_code", exiterr.ExitCode())
@@ -147,7 +136,12 @@ func parseCcissDevices(logger *slog.Logger, cciss gjson.Result) []Device {
 			return devices
 		}
 	}
-	logger.Debug("cciss_vol_status: ", string(out))
+	logger.Debug("cciss_vol_status output reading", "output", string(out))
+
+	isCcissDevice := strings.HasPrefix(string(out), "Controller:")
+	if !isCcissDevice {
+		return []Device{device}
+	}
 
 	re := regexp.MustCompile(`.*Physical drives: (?P<num_drivers>[0-9]+)`)
 	match := re.FindStringSubmatch(string(out))
@@ -157,10 +151,13 @@ func parseCcissDevices(logger *slog.Logger, cciss gjson.Result) []Device {
 	}
 
 	idx := re.SubexpIndex("num_drivers")
-	numDrivers, _ := strconv.Atoi(match[idx])
-	for i := 0; i < numDrivers; i++ {
+	numDrivers, err := strconv.Atoi(match[idx])
+	if err != nil {
+		logger.Error("Failed to parse number of physical drives", "device", device.Label, "application", *ccissVolStatusPath, "err", err)
+	}
+	for i := range numDrivers {
 		d := device
-		d.Type = fmt.Sprintf("%s,%d", d.Type, i)
+		d.Type = fmt.Sprintf("%s,%d", CcissType, i)
 		devices = append(devices, d)
 	}
 

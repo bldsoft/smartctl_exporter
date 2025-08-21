@@ -138,15 +138,12 @@ var (
 func scanDevices(logger *slog.Logger) []Device {
 	filter := newDeviceFilter(*smartctlDeviceExclude, *smartctlDeviceInclude)
 
-	baseDevices := readSMARTctlDevices(logger)
-	ccissDevices := readSMARTctlDevices(logger, "--device", "sat")
+	rawDevices := readSMARTctlDevices(logger)
 
 	scanDevices := []Device{}
 
-	isExists := map[string]bool{}
-	for _, d := range baseDevices.Get("devices").Array() {
-		logger.Debug("Base device", "name", d)
-		isExists[strings.TrimSpace(d.Get("info_name").String())] = true
+	for _, d := range rawDevices.Get("devices").Array() {
+		logger.Debug("Raw device info", "info", d)
 
 		deviceName := d.Get("name").String()
 		deviceType := d.Get("type").String()
@@ -166,16 +163,7 @@ func scanDevices(logger *slog.Logger) []Device {
 			Type:  deviceType,
 			Label: deviceLabel,
 		}
-		scanDevices = append(scanDevices, device)
-	}
-
-	for _, d := range ccissDevices.Get("devices").Array() {
-		if isExists[strings.TrimSpace(d.Get("info_name").String())] {
-			continue
-		}
-		logger.Debug("Raid device", "name", d)
-
-		devices := parseCcissDevices(logger, d)
+		devices := parseIfItIsCcissDevices(logger, device)
 		scanDevices = append(scanDevices, devices...)
 	}
 
