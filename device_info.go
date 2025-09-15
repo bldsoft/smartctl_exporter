@@ -60,10 +60,6 @@ func devicesHandler(collector *SMARTctlManagerCollector) http.HandlerFunc {
 			vendor := getDeviceVendor(jsonData)
 			size := uint64(jsonData.Get("user_capacity.bytes").Uint())
 
-			serial := jsonData.Get("serial_number").String()
-			if serial == "" {
-				serial = jsonData.Get("scsi_serial_number").String()
-			}
 			devices = append(devices, DeviceInfo{
 				Label:  device.Label,
 				Name:   device.Name,
@@ -71,7 +67,7 @@ func devicesHandler(collector *SMARTctlManagerCollector) http.HandlerFunc {
 				Model:  model,
 				Size:   size,
 				Vendor: vendor,
-				Serial: serial,
+				Serial: device.Serial,
 			})
 		}
 

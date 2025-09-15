@@ -62,10 +62,7 @@ func readFakeSMARTctl(logger *slog.Logger, device Device) gjson.Result {
 	return parseJSON(string(jsonFile))
 }
 
-// Get json from smartctl and parse it
-func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
-	defer wg.Done()
-	start := time.Now()
+func readSMARTctlData(logger *slog.Logger, device Device) gjson.Result {
 	var smartctlArgs = []string{"--json", "--info", "--health", "--attributes", "--tolerance=verypermissive", "--nocheck=" + *smartctlPowerModeCheck, "--format=brief", "--log=error", "--device=" + device.Type, device.Name}
 
 	logger.Debug("Calling smartctl with args", "args", strings.Join(smartctlArgs, " "))
@@ -75,7 +72,15 @@ func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
 	}
 	// Accommodate a smartmontools pre-7.3 bug
 	cleaned_out := strings.TrimPrefix(string(out), "  Pending defect count:")
-	json := parseJSON(cleaned_out)
+	return parseJSON(cleaned_out)
+}
+
+// Get json from smartctl and parse it
+func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
+	defer wg.Done()
+	start := time.Now()
+
+	json := readSMARTctlData(logger, device)
 	rcOk := resultCodeIsOk(logger, device, json.Get("smartctl.exit_status").Int())
 	jsonOk := jsonIsOk(logger, json)
 	logger.Debug("Collected S.M.A.R.T. json data", "device", device, "duration", time.Since(start))

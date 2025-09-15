@@ -14,10 +14,12 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,9 +38,10 @@ import (
 
 // Device
 type Device struct {
-	Name  string
-	Type  string
-	Label string
+	Name   string
+	Type   string
+	Label  string
+	Serial string // Serial number needed for dedublication
 }
 
 func (d Device) String() string {
@@ -134,6 +137,44 @@ var (
 	).Default("standby").String()
 )
 
+func deduplicateDevices(logger *slog.Logger, devices []Device) []Device {
+	// MegaRaid devices can be displayed as both megaraid and sat at the same time. So we remove duplicates.
+	// smartctl_device{device="sdc",interface="sat",...}
+	// smartctl_device{device="bus_0_sat+megaraid_2",interface="sat+megaraid,2",...}
+	seen := make(map[string]bool)
+	result := []Device{}
+
+	// Place megaraid before auto
+	slices.SortFunc(devices, func(a, b Device) int { return cmp.Compare(b.Type, a.Type) })
+	for _, device := range devices {
+		json := readSMARTctlData(logger, device)
+		device.Serial = json.Get("serial_number").String()
+		vendor := getDeviceVendor(json)
+
+		// Skip LSI/AVAGO devices as they are usually just virtual devices for RAID controllers
+		virtualDevicesVendor := []string{"LSI", "AVAGO"}
+		if slices.Contains(virtualDevicesVendor, vendor) {
+			continue
+		}
+
+		if device.Serial == "" {
+			result = append(result, device)
+			continue
+		}
+		if !seen[device.Serial] {
+			seen[device.Serial] = true
+			result = append(result, device)
+		} else {
+			logger.Debug("Duplicate device found and ignored", "label", device.Label, "serial", device.Serial)
+		}
+	}
+	slices.SortFunc(result, func(a, b Device) int { return cmp.Compare(a.String(), b.String()) })
+
+	// Clear the original slice and copy the deduplicated results back
+	devices = devices[:0]
+	return append(devices, result...)
+}
+
 // scanDevices uses smartctl to gather the list of available devices.
 func scanDevices(logger *slog.Logger) []Device {
 	filter := newDeviceFilter(*smartctlDeviceExclude, *smartctlDeviceInclude)
@@ -143,7 +184,7 @@ func scanDevices(logger *slog.Logger) []Device {
 	scanDevices := []Device{}
 
 	for _, d := range rawDevices.Get("devices").Array() {
-		logger.Debug("Raw device info", "info", d)
+		logger.Debug("Raw device info", "info", d.String())
 
 		deviceName := d.Get("name").String()
 		deviceType := d.Get("type").String()
@@ -176,7 +217,7 @@ func scanDevices(logger *slog.Logger) []Device {
 			scanDeviceResult = append(scanDeviceResult, d)
 		}
 	}
-	return scanDeviceResult
+	return deduplicateDevices(logger, scanDeviceResult)
 }
 
 func buildDevicesFromFlag(devices []Device) []Device {
