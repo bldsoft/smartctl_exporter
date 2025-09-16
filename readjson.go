@@ -62,12 +62,14 @@ func readFakeSMARTctl(logger *slog.Logger, device Device) gjson.Result {
 	return parseJSON(string(jsonFile))
 }
 
-func readSMARTctlData(logger *slog.Logger, device Device) gjson.Result {
+func readSMARTctlData(logger *slog.Logger, device Device, debugOnly bool) gjson.Result {
 	var smartctlArgs = []string{"--json", "--info", "--health", "--attributes", "--tolerance=verypermissive", "--nocheck=" + *smartctlPowerModeCheck, "--format=brief", "--log=error", "--device=" + device.Type, device.Name}
 
 	logger.Debug("Calling smartctl with args", "args", strings.Join(smartctlArgs, " "))
 	out, err := exec.Command(*smartctlPath, smartctlArgs...).Output()
-	if err != nil {
+	if debugOnly {
+		logger.Debug("S.M.A.R.T. output reading", "err", err, "device", device)
+	} else if err != nil {
 		logger.Warn("S.M.A.R.T. output reading", "err", err, "device", device)
 	}
 	// Accommodate a smartmontools pre-7.3 bug
@@ -80,7 +82,7 @@ func readSMARTctl(logger *slog.Logger, device Device, wg *sync.WaitGroup) {
 	defer wg.Done()
 	start := time.Now()
 
-	json := readSMARTctlData(logger, device)
+	json := readSMARTctlData(logger, device, false)
 	rcOk := resultCodeIsOk(logger, device, json.Get("smartctl.exit_status").Int())
 	jsonOk := jsonIsOk(logger, json)
 	logger.Debug("Collected S.M.A.R.T. json data", "device", device, "duration", time.Since(start))
@@ -133,11 +135,26 @@ func parseIfItIsCcissDevices(logger *slog.Logger, device Device) []Device {
 	logger.Debug("try get cciss device status", "label", device.Label, "name", device.Name)
 	out, err := exec.Command(*ccissVolStatusPath, device.Name, "-V").Output()
 	if exiterr, ok := err.(*exec.ExitError); ok {
-		logger.Debug("Exit Status", "exit_code", exiterr.ExitCode())
+		logger.Debug("Exit Status", "exit_code", exiterr.ExitCode(), "stderr", string(exiterr.Stderr))
 		// 0 - All configured logical drives queried have status of "OK."
 		// 1 - One or more configured logical drives queried have status other than "OK."
 		if exiterr.ExitCode() > 1 {
 			logger.Warn("cciss_vol_status output reading", "err", err, "device", device.Label)
+			return devices
+		}
+
+		// If the output contains "unknown controller", it means that the controller is not recognized.
+		// In this case, we will create 50 virtual devices for the controller.
+		// This is a workaround for systems with multiple controllers where some controllers may not be recognized.
+		// In deduplicateDevices function, we will check and remove devices if not exists.
+		unknownController := strings.Contains(string(exiterr.Stderr), "unknown controller")
+		if unknownController {
+			logger.Warn("cciss_vol_status warning", "output", string(exiterr.Stderr), "device", device.Label)
+			for i := range 50 {
+				d := device
+				d.Type = fmt.Sprintf("%s,%d", CcissType, i)
+				devices = append(devices, d)
+			}
 			return devices
 		}
 	}

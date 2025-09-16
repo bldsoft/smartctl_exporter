@@ -147,9 +147,15 @@ func deduplicateDevices(logger *slog.Logger, devices []Device) []Device {
 	// Place megaraid before auto
 	slices.SortFunc(devices, func(a, b Device) int { return cmp.Compare(b.Type, a.Type) })
 	for _, device := range devices {
-		json := readSMARTctlData(logger, device)
+		json := readSMARTctlData(logger, device, true)
 		device.Serial = json.Get("serial_number").String()
 		vendor := getDeviceVendor(json)
+
+		// Skip devices without capacity
+		size := uint64(json.Get("user_capacity.bytes").Uint())
+		if size == 0 {
+			continue
+		}
 
 		// Skip LSI/AVAGO devices as they are usually just virtual devices for RAID controllers
 		virtualDevicesVendor := []string{"LSI", "AVAGO"}
@@ -213,11 +219,15 @@ func scanDevices(logger *slog.Logger) []Device {
 		if filter.ignored(d.Label) {
 			logger.Info("Ignoring device", "name", d.Label)
 		} else {
-			logger.Info("Found device", "name", d.Label)
 			scanDeviceResult = append(scanDeviceResult, d)
 		}
 	}
-	return deduplicateDevices(logger, scanDeviceResult)
+
+	devices := deduplicateDevices(logger, scanDeviceResult)
+	for _, d := range devices {
+		logger.Info("Found device", "name", d.Label)
+	}
+	return devices
 }
 
 func buildDevicesFromFlag(devices []Device) []Device {
