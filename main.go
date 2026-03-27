@@ -153,7 +153,8 @@ func deduplicateDevices(logger *slog.Logger, devices []Device) []Device {
 
 		// Skip devices without capacity
 		size := uint64(json.Get("user_capacity.bytes").Uint())
-		if size == 0 {
+		nvmesize := uint64(json.Get("nvme_total_capacity").Uint())
+		if size == 0 && nvmesize == 0 {
 			continue
 		}
 
