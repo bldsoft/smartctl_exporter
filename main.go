@@ -164,7 +164,7 @@ func deduplicateDevices(logger *slog.Logger, devices []Device) []Device {
 		}
 
 		// Skip devices without SMART attributes
-		if !json.Get("ata_smart_attributes").Exists() {
+		if !json.Get("ata_smart_attributes").Exists() && !json.Get("nvme_smart_health_information_log").Exists() {
 			continue
 		}
 
