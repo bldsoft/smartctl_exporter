@@ -163,6 +163,11 @@ func deduplicateDevices(logger *slog.Logger, devices []Device) []Device {
 			continue
 		}
 
+		// Skip devices without SMART attributes
+		if !json.Get("ata_smart_attributes").Exists() {
+			continue
+		}
+
 		if device.Serial == "" {
 			result = append(result, device)
 			continue
