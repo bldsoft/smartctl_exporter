@@ -59,6 +59,9 @@ func devicesHandler(collector *SMARTctlManagerCollector) http.HandlerFunc {
 			model := getDeviceModel(jsonData)
 			vendor := getDeviceVendor(jsonData)
 			size := uint64(jsonData.Get("user_capacity.bytes").Uint())
+			if size == 0 {
+				size = uint64(jsonData.Get("nvme_total_capacity").Uint())
+			}
 
 			devices = append(devices, DeviceInfo{
 				Label:  device.Label,
